@@ -24,6 +24,7 @@ compose.desktop {
         }
         buildTypes.release.proguard {
             version.set("7.5.0")
+            isEnabled.set(false)
         }
     }
 }
