@@ -22,5 +22,8 @@ compose.desktop {
             packageName = "Seal Desktop"
             packageVersion = "1.0.0"
         }
+        buildTypes.release.proguard {
+            version.set("7.5.0")
+        }
     }
 }
