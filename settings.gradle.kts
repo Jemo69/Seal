@@ -3,6 +3,7 @@ pluginManagement {
         gradlePluginPortal()
         google()
         mavenCentral()
+        mavenCentral()
     }
 }
 plugins {
@@ -13,9 +14,11 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        mavenCentral()
         mavenLocal()
     }
 }
 rootProject.name = "Seal"
 include (":app")
 include(":color")
+include(":desktop")
