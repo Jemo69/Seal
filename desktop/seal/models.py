@@ -66,6 +66,17 @@ class Format:
             parts.append(f"{self.tbr:.0f} kbps")
         return " - ".join(part for part in parts if part)
 
+    @property
+    def selector(self) -> str:
+        """The selector of the format for yt-dlp.
+
+        A video format of a website often has no sound of its own, the audio track has to
+        be added, otherwise the file that is downloaded is silent.
+        """
+        if self.has_audio:
+            return self.format_id
+        return f"{self.format_id}+bestaudio/{self.format_id}"
+
 
 @dataclass
 class VideoInfo:
@@ -147,6 +158,7 @@ class Task:
     audio_only: bool = False
     format_id: str = ""
     playlist: bool = False
+    is_playlist: bool = False
 
     @property
     def progress_percent(self) -> int:

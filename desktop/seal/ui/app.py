@@ -276,8 +276,13 @@ class MainWindow(tk.Tk):
             )
 
     def _on_close(self) -> None:
-        self.settings.save()
-        self.destroy()
+        try:
+            self.settings.save()
+        except OSError:
+            # The window has to close even when the settings cannot be written.
+            pass
+        finally:
+            self.destroy()
 
 
 def run() -> None:

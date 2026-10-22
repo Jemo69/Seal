@@ -115,6 +115,10 @@ class Settings:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return cls()
+        if not isinstance(payload, dict):
+            # A file that holds something else than an object must not stop the
+            # application from starting.
+            return cls()
         known = {f.name for f in fields(cls)}
         values = {key: value for key, value in payload.items() if key in known}
         settings = cls(**values)

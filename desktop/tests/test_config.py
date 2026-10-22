@@ -46,6 +46,13 @@ def test_load_ignores_broken_files(tmp_path: Path, monkeypatch) -> None:
     assert Settings.load().theme == "system"
 
 
+def test_load_ignores_a_file_that_is_not_an_object(tmp_path: Path, monkeypatch) -> None:
+    """A file that holds something else must not stop the application."""
+    monkeypatch.setattr(config, "data_dir", lambda: tmp_path)
+    (tmp_path / "config.json").write_text(json.dumps(5))
+    assert Settings.load().theme == "system"
+
+
 def test_target_dir(tmp_path: Path) -> None:
     settings = Settings(download_dir=str(tmp_path / "videos"), audio_dir=str(tmp_path / "audio"))
     assert settings.target_dir(audio=False).name == "videos"

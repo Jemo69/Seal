@@ -60,6 +60,17 @@ def test_format_properties() -> None:
     assert "mp4" in video.label
 
 
+def test_a_video_without_sound_gets_the_audio_of_the_website() -> None:
+    """A video format without a sound would be downloaded without any sound."""
+    video = Format(format_id="137", ext="mp4", resolution="1920x1080", vcodec="avc1")
+    assert video.selector == "137+bestaudio/137"
+
+
+def test_a_format_with_sound_is_used_as_it_is() -> None:
+    complete = Format(format_id="18", ext="mp4", resolution="640x360", vcodec="avc1", acodec="mp4a")
+    assert complete.selector == "18"
+
+
 def test_task_progress_is_capped() -> None:
     task = Task(url="https://example.com", progress=1.5)
     assert task.progress_percent == 100

@@ -64,6 +64,10 @@ class History:
             payload = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return []
+        if not isinstance(payload, list):
+            # A file that holds something else than a list must not stop the application
+            # from starting.
+            return []
         entries = []
         for item in payload:
             try:

@@ -117,8 +117,17 @@ class QueueTab(ttk.Frame):
         """Adds a download to the list."""
         self.empty_label.grid_remove()
         row = TaskRow(self.container, self.app, task)
-        row.grid(row=len(self.rows), column=0, sticky="ew", pady=(0, 8))
         self.rows[task.task_id] = row
+        self._layout_rows()
+
+    def _layout_rows(self) -> None:
+        """Places the rows one below the other.
+
+        The rows are placed again after a removal, otherwise a new row would land on the
+        place of a row that was removed before it.
+        """
+        for index, row in enumerate(self.rows.values()):
+            row.grid(row=index, column=0, sticky="ew", pady=(0, 8))
 
     def update_task(self, task: Task) -> None:
         """Refreshes a single download."""
@@ -131,6 +140,7 @@ class QueueTab(ttk.Frame):
         row = self.rows.pop(task_id, None)
         if row is not None:
             row.destroy()
+        self._layout_rows()
         if not self.rows:
             self.empty_label.grid()
 

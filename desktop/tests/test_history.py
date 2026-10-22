@@ -28,6 +28,13 @@ def test_history_ignores_broken_files(tmp_path: Path) -> None:
     assert History(path).entries == []
 
 
+def test_history_ignores_a_file_that_is_not_a_list(tmp_path: Path) -> None:
+    """A file that holds something else must not stop the application."""
+    path = tmp_path / "history.json"
+    path.write_text("5")
+    assert History(path).entries == []
+
+
 def test_extract_urls() -> None:
     text = "look at this https://example.com/video and https://example.com/other too"
     assert extract_urls(text) == ["https://example.com/video", "https://example.com/other"]

@@ -63,7 +63,8 @@ class DownloadTab(ttk.Frame):
 
         ttk.Label(
             self,
-            text="Several links can be pasted at once, they are downloaded one after another.",
+            text="Several links can be pasted at once, the settings say how many of them "
+            "are downloaded at the same time.",
             style="Muted.TLabel",
             wraplength=640,
         ).grid(row=1, column=0, sticky="w", pady=(6, 0))
@@ -111,6 +112,9 @@ class DownloadTab(ttk.Frame):
         ttk.Checkbutton(options, text="Whole playlist", variable=self.playlist_var).grid(
             row=0, column=1
         )
+        # The formats of the box depend on the sound, only the audio formats are offered
+        # when the user asks for the sound alone.
+        self.audio_only_var.trace_add("write", lambda *_: self._refresh_formats())
 
     # ------------------------------------------------------------------ actions
 
@@ -146,10 +150,7 @@ class DownloadTab(ttk.Frame):
             details.append(f"{info.playlist_count} videos")
         self.meta_label.configure(text="  •  ".join(details))
 
-        self._formats = self._format_list(info)
-        self.format_box.configure(values=[label for label, _ in self._formats])
-        if self._formats:
-            self.format_var.set(self._formats[0][0])
+        self._refresh_formats()
 
         thumbnail = load_thumbnail(info.thumbnail, 220, 124, self.palette)
         if thumbnail is not None:
@@ -159,27 +160,39 @@ class DownloadTab(ttk.Frame):
         self.download_button.configure(state="normal")
         self.card.grid()
 
-    def _format_list(self, info: VideoInfo) -> list[tuple[str, str]]:
+    def _refresh_formats(self) -> None:
+        """Fills the format box with the formats that fit the chosen options."""
+        if self.info is None:
+            return
+        self._formats = self._format_list(self.info, self.audio_only_var.get())
+        self.format_box.configure(values=[label for label, _ in self._formats])
+        if self._formats:
+            self.format_var.set(self._formats[0][0])
+
+    def _format_list(self, info: VideoInfo, audio_only: bool = False) -> list[tuple[str, str]]:
         """Builds the entries of the format selection."""
         entries: list[tuple[str, str]] = []
         if info.is_playlist:
             entries.append(("Best quality", "bestvideo*+bestaudio/best"))
             return entries
 
-        video = [fmt for fmt in info.formats if fmt.has_video]
         audio = [fmt for fmt in info.formats if not fmt.has_video and fmt.has_audio]
 
-        video.sort(key=lambda fmt: (fmt.height, fmt.tbr or 0), reverse=True)
-        seen: set[str] = set()
-        for fmt in video:
-            if fmt.height and fmt.height in seen:
-                continue
-            if fmt.height:
-                seen.add(fmt.height)
-            entries.append((f"Video • {fmt.label}", fmt.format_id))
+        if not audio_only:
+            video = [fmt for fmt in info.formats if fmt.has_video]
+            video.sort(key=lambda fmt: (fmt.height, fmt.tbr or 0), reverse=True)
+            seen: set[str] = set()
+            for fmt in video:
+                if fmt.height and fmt.height in seen:
+                    continue
+                if fmt.height:
+                    seen.add(fmt.height)
+                entries.append((f"Video • {fmt.label}", fmt.selector))
 
-        if not entries:
-            entries.append(("Best quality", "bestvideo*+bestaudio/best"))
+            if not entries:
+                entries.append(("Best quality", "bestvideo*+bestaudio/best"))
+        else:
+            entries.append(("Best audio", "bestaudio/best"))
 
         for fmt in sorted(audio, key=lambda fmt: fmt.tbr or 0, reverse=True)[:3]:
             entries.append((f"Audio • {fmt.ext} • {fmt.tbr or 0:.0f} kbps", fmt.format_id))
@@ -191,16 +204,17 @@ class DownloadTab(ttk.Frame):
             return
         url = self.info.url
         format_id = ""
-        for label, value in self._formats:
-            if label == self.format_var.get():
-                format_id = value
-                break
+        # The index is used and not the label, two formats can have the same label.
+        index = self.format_box.current()
+        if 0 <= index < len(self._formats):
+            format_id = self._formats[index][1]
 
         task = Task(
             url=url,
             title=self.info.title,
             audio_only=self.audio_only_var.get(),
             playlist=self.playlist_var.get(),
+            is_playlist=self.info.is_playlist,
             format_id=format_id,
         )
         self.app.enqueue(task)

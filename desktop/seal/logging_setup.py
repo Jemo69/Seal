@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
 from pathlib import Path
 
 from .config import data_dir
@@ -15,6 +16,7 @@ from .config import data_dir
 LOG_NAME = "seal.log"
 
 _configured = False
+_configure_lock = threading.Lock()
 
 
 def log_path() -> Path:
@@ -26,23 +28,24 @@ def _configure() -> logging.Logger:
     """Creates the logger, it is only done once."""
     global _configured
     logger = logging.getLogger("seal")
-    if _configured:
-        return logger
+    with _configure_lock:
+        if _configured:
+            return logger
 
-    path = log_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        handler = logging.FileHandler(path, encoding="utf-8")
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
-        )
-        logger.addHandler(handler)
-    except OSError:
-        # The log file is a help, the application works without it.
-        pass
-    logger.setLevel(logging.DEBUG)
-    logger.propagate = False
-    _configured = True
+        path = log_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handler = logging.FileHandler(path, encoding="utf-8")
+            handler.setFormatter(
+                logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+            )
+            logger.addHandler(handler)
+        except OSError:
+            # The log file is a help, the application works without it.
+            pass
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False
+        _configured = True
     return logger
 
 
@@ -67,6 +70,9 @@ class YtdlpLogger:
 
     def __init__(self) -> None:
         self.logger = get_logger("yt-dlp")
+        # yt-dlp hides the errors of an extraction, the last one is kept so that the
+        # user can be told what went wrong.
+        self.last_error = ""
 
     def debug(self, message: str) -> None:
         if message.startswith("[debug] "):
@@ -80,4 +86,5 @@ class YtdlpLogger:
         self.logger.warning(message)
 
     def error(self, message: str) -> None:
+        self.last_error = message
         self.logger.error(message)

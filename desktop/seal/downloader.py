@@ -86,8 +86,11 @@ class DownloadManager:
         self.on_update = on_update or (lambda task: None)
         self.on_finished = on_finished or (lambda task: None)
         self._tasks: dict[str, Task] = {}
-        self._cancelled: set[str] = set()
+        self._stopped: set[str] = set()
         self._lock = threading.Lock()
+        # The settings say how many downloads may run at the same time.
+        self._slots = threading.Condition()
+        self._running = 0
 
     # -------------------------------------------------------------------- tasks
 
@@ -110,9 +113,11 @@ class DownloadManager:
             "noprogress": True,
             "consoletitle": False,
             "windowsfilenames": True,
-            # "only_download" is truthy, yt-dlp would swallow every error of the extraction
-            # with it. The information of a link has to fail loudly.
-            "ignoreerrors": "only_download" if not quick else False,
+            # The information of a link has to fail loudly. yt-dlp returns None instead of
+            # raising when it may ignore the errors, a download that failed would look
+            # like a download that worked. A download keeps "only_download" so that a
+            # single broken video of a playlist does not stop the whole playlist.
+            "ignoreerrors": False if quick else "only_download",
             # A link that cannot be read should not keep the user waiting for minutes.
             "retries": 2 if quick else 5,
             "fragment_retries": 2 if quick else 5,
@@ -164,6 +169,13 @@ class DownloadManager:
             if postprocessors:
                 options["postprocessors"] = postprocessors
 
+        if task.is_playlist:
+            # Only the first video of a playlist when the user does not want all of them.
+            if settings.playlist_items:
+                options["playlist_items"] = settings.playlist_items
+            elif not task.playlist:
+                options["playlist_items"] = "1"
+
         if settings.embed_metadata:
             options["postprocessors"] = options.get("postprocessors", []) + [
                 {"key": "FFmpegMetadata", "add_chapters": True, "add_metadata": True}
@@ -196,7 +208,12 @@ class DownloadManager:
         """Fetches the information of a video in a background thread."""
 
         def worker() -> None:
-            _require_ytdlp()
+            try:
+                _require_ytdlp()
+            except YtdlpNotInstalled as error:
+                # The thread must not die, the user interface waits for the answer.
+                on_done(None, str(error))
+                return
             log(f"reading the information of {url}")
             result: list[tuple[Any, str]] = []
 
@@ -235,67 +252,104 @@ class DownloadManager:
         """Starts a download."""
         with self._lock:
             self._tasks[task.task_id] = task
-        thread = threading.Thread(target=self._run_download, args=(task,), daemon=True)
+        thread = threading.Thread(target=self._guarded_download, args=(task,), daemon=True)
         thread.start()
 
     def cancel(self, task_id: str) -> None:
         """Cancels a running download."""
         with self._lock:
-            self._cancelled.add(task_id)
             task = self._tasks.get(task_id)
-        if task and not task.state.is_finished:
-            task.state = TaskState.CANCELED
-            task.error = "Canceled"
-            self.on_update(task)
-            self.on_finished(task)
+            if task is None or task.state.is_finished:
+                return
+            self._stopped.add(task_id)
+        task.state = TaskState.CANCELED
+        task.error = "Canceled"
+        self.on_update(task)
+        self.on_finished(task)
 
     def remove(self, task_id: str) -> None:
         """Removes a task from the list."""
         with self._lock:
-            self._tasks.pop(task_id, None)
-            self._cancelled.discard(task_id)
+            task = self._tasks.pop(task_id, None)
+            if task is not None and not task.state.is_finished:
+                # The download is still running, it has to stop. The flag of a cancel must
+                # not be cleared, the download would continue and land in the history.
+                self._stopped.add(task_id)
 
-    def _is_cancelled(self, task_id: str) -> bool:
+    def _is_stopped(self, task_id: str) -> bool:
         with self._lock:
-            return task_id in self._cancelled
+            return task_id in self._stopped
+
+    def _wait_for_slot(self) -> None:
+        """Waits until a download may start."""
+        with self._slots:
+            while self._running >= _concurrency_limit(self.settings):
+                self._slots.wait()
+            self._running += 1
+
+    def _free_slot(self) -> None:
+        with self._slots:
+            self._running -= 1
+            self._slots.notify()
+
+    def _guarded_download(self, task: Task) -> None:
+        """Runs a download when one of the free slots is available."""
+        self._wait_for_slot()
+        try:
+            self._run_download(task)
+        finally:
+            self._free_slot()
 
     def _run_download(self, task: Task) -> None:
-        _require_ytdlp()
-        options = self._download_options(task)
-        log(f"starting the download of {task.url}")
-
-        def progress_hook(data: dict[str, Any]) -> None:
-            if self._is_cancelled(task.task_id):
-                raise DownloadCancelled()
-            status = data.get("status")
-            if status == "downloading":
-                total = data.get("total_bytes") or data.get("total_bytes_estimate") or 0
-                downloaded = data.get("downloaded_bytes") or 0
-                task.progress = (downloaded / total) if total else 0.0
-                task.speed = format_size(data.get("speed"))
-                task.eta = format_duration(data.get("eta"))
-                task.size = format_size(total)
-                task.state = TaskState.DOWNLOADING
-                self.on_update(task)
-            elif status == "finished":
-                task.progress = 1.0
-                task.state = TaskState.PROCESSING
-                self.on_update(task)
-
-        def postprocessor_hook(data: dict[str, Any]) -> None:
-            if data.get("status") == "started":
-                task.state = TaskState.PROCESSING
-                self.on_update(task)
-
-        options["progress_hooks"] = [progress_hook]
-        options["postprocessor_hooks"] = [postprocessor_hook]
-
+        logger = YtdlpLogger()
         try:
-            with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(task.url, download=True)
-            if self._is_cancelled(task.task_id):
+            _require_ytdlp()
+            if self._is_stopped(task.task_id):
                 task.state = TaskState.CANCELED
                 task.error = "Canceled"
+                self.on_update(task)
+                self.on_finished(task)
+                return
+
+            options = self._download_options(task)
+            options["logger"] = logger
+            log(f"starting the download of {task.url}")
+
+            def progress_hook(data: dict[str, Any]) -> None:
+                if self._is_stopped(task.task_id):
+                    raise DownloadCancelled()
+                status = data.get("status")
+                if status == "downloading":
+                    total = data.get("total_bytes") or data.get("total_bytes_estimate") or 0
+                    downloaded = data.get("downloaded_bytes") or 0
+                    task.progress = (downloaded / total) if total else 0.0
+                    task.speed = format_size(data.get("speed"))
+                    task.eta = format_duration(data.get("eta"))
+                    task.size = format_size(total)
+                    task.state = TaskState.DOWNLOADING
+                    self.on_update(task)
+                elif status == "finished":
+                    task.progress = 1.0
+                    task.state = TaskState.PROCESSING
+                    self.on_update(task)
+
+            def postprocessor_hook(data: dict[str, Any]) -> None:
+                if data.get("status") == "started":
+                    task.state = TaskState.PROCESSING
+                    self.on_update(task)
+
+            options["progress_hooks"] = [progress_hook]
+            options["postprocessor_hooks"] = [postprocessor_hook]
+
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(task.url, download=True)
+            if self._is_stopped(task.task_id):
+                task.state = TaskState.CANCELED
+                task.error = "Canceled"
+            elif info is None:
+                # yt-dlp hides the error of the extraction, the download has failed.
+                task.state = TaskState.ERROR
+                task.error = friendly_error(logger.last_error or "The download has failed.")
             else:
                 task.state = TaskState.COMPLETED
                 task.progress = 1.0
@@ -306,9 +360,20 @@ class DownloadManager:
         except Exception as error:  # noqa: BLE001 - the message is shown to the user
             log_exception(f"the download of {task.url} failed")
             task.state = TaskState.ERROR
-            task.error = str(error)
+            task.error = friendly_error(str(error))
+        finally:
+            with self._lock:
+                self._stopped.discard(task.task_id)
         self.on_update(task)
         self.on_finished(task)
+
+
+def _concurrency_limit(settings: Settings) -> int:
+    """How many downloads may run at the same time."""
+    try:
+        return max(1, int(settings.max_concurrent_downloads))
+    except (TypeError, ValueError):
+        return 1
 
 
 INFO_TIMEOUT = 90
@@ -327,7 +392,14 @@ def friendly_error(error: str) -> str:
         return "This video is private, a login is needed to see it."
     if "unsupported url" in lowered or "no video formats" in lowered:
         return "The website does not offer any video for this link."
-    if "timed out" in lowered or "timed out" in lowered:
+    if (
+        "timed out" in lowered
+        or "timeout" in lowered
+        or "unable to download webpage" in lowered
+        or "connection refused" in lowered
+        or "connection reset" in lowered
+        or "name or service not known" in lowered
+    ):
         return (
             "The website did not answer in time. The connection to the internet might be "
             "blocked, a proxy could help."

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from seal.config import Settings
 from seal.downloader import DownloadManager, friendly_error
+from seal.models import Task
 
 
 def test_the_login_hint_is_shown() -> None:
@@ -45,5 +46,13 @@ def test_the_errors_of_the_extraction_are_not_swallowed(tmp_path: Path) -> None:
     """yt-dlp hides the error of an extraction when ignoreerrors is set."""
     manager = DownloadManager(Settings(download_dir=str(tmp_path)))
     assert manager._info_options()["ignoreerrors"] is False
-    # a download may fail without stopping the whole playlist
-    assert manager._download_options.__self__ is manager
+    # A download keeps "only_download" so that a broken video of a playlist does not
+    # stop the whole playlist, the manager has to notice the None that yt-dlp returns.
+    assert manager._download_options(Task(url="https://example.com"))["ignoreerrors"] == (
+        "only_download"
+    )
+
+
+def test_a_timeout_is_explained() -> None:
+    assert "did not answer" in friendly_error("The socket timed out").lower()
+    assert "did not answer" in friendly_error("Read timed out. Read on timeout").lower()

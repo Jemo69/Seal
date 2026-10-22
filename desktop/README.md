@@ -11,7 +11,7 @@ the user, no server is involved.
 
 - Download videos and audio files from every site that yt-dlp supports.
 - Pick the format, the resolution or extract the audio track.
-- Several links at once, they are downloaded one after another.
+- Several links at once, the settings say how many of them are downloaded at the same time.
 - A queue that shows the progress, the speed and the remaining time.
 - Download photos, reels, igtv and whole profiles from Instagram.
 - A history of everything that was downloaded.
@@ -94,6 +94,8 @@ written to `%LOCALAPPDATA%\Seal\history.json`.
 | Maximum speed | Limits the speed of the download, for example `2M` |
 | Cookies from browser | The browser the cookies are taken from, YouTube asks for a login for most of the videos |
 | Cookies file | A cookies file of your browser, some sites ask for a login |
+| Fragments that are downloaded at once | How many parts of a video are fetched at the same time |
+| Downloads that run at the same time | How many links are downloaded at the same time, two by default |
 | Extra arguments for yt-dlp | Anything that is not covered by the settings above |
 | Session file | The session of instaloader, it is needed for the stories of instagram |
 
