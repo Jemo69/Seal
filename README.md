@@ -107,6 +107,19 @@ For most devices, it is recommended to install the **arm64-v8a** version of the 
 
 - Stable releases are also available on [F-Droid](https://f-droid.org/packages/com.junkfood.seal/)
 
+## 🖥️ Windows
+
+There is a desktop version of Seal for Windows in the [`desktop`](desktop) folder. It is a
+small python application that wraps [yt-dlp](https://github.com/yt-dlp/yt-dlp) and
+[instaloader](https://github.com/instaloader/instaloader), so it downloads videos, audio and
+the media of instagram posts.
+
+- Run it from the sources with `desktop\run.bat`
+- Build the executable with `desktop\build_windows.bat`
+- The GitHub action [windows.yml](.github/workflows/windows.yml) builds it on every push
+
+Have a look at the [readme of the desktop version](desktop/README.md) for all the details.
+
 <!-- [<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png"
      alt="Get it on F-Droid"
      height="70">](https://f-droid.org/packages/com.junkfood.seal/) -->
