@@ -13,6 +13,7 @@ from .. import APP_NAME, __version__
 from ..config import Settings
 from ..downloader import DownloadManager, is_available, version
 from ..history import History, HistoryEntry
+from ..logging_setup import log_exception, log_path
 from ..instagram import InstagramClient, InstagramItem, InstagramTarget
 from ..models import Task, TaskState
 from .download_tab import DownloadTab
@@ -121,7 +122,9 @@ class MainWindow(tk.Tk):
 
     def show_error(self, message: str) -> None:
         """Shows an error message."""
-        messagebox.showerror(APP_NAME, message, parent=self)
+        messagebox.showerror(
+            APP_NAME, f"{message}\n\nThe details are written to {log_path()}", parent=self
+        )
 
     def show_message(self, message: str) -> None:
         """Shows a short message in the status bar."""
@@ -183,37 +186,60 @@ class MainWindow(tk.Tk):
         self.events.put(("finished", task))
 
     def _process_events(self) -> None:
-        """Moves the updates of the download threads into the user interface."""
+        """Moves the updates of the download threads into the user interface.
+
+        The loop is never interrupted, a single broken update must not freeze the whole
+        application.
+        """
         try:
             while True:
                 kind, payload = self.events.get_nowait()
-                if kind == "update":
-                    self.queue_tab.update_task(payload)
-                elif kind == "finished":
-                    self._on_finished(payload)
-                elif kind == "info":
-                    self._on_info(payload)
-                elif kind == "instagram":
-                    self._on_instagram(payload)
-                elif kind == "instagram_item":
-                    index, success, detail = payload
-                    self.instagram_tab.item_finished(index, success)
-                    if success:
-                        self.history_tab.refresh()
+                self._handle_event(kind, payload)
         except queue.Empty:
             pass
-        self.after(80, self._process_events)
+        except Exception:  # noqa: BLE001 - the loop has to keep running
+            log_exception("an update could not be processed")
+        finally:
+            self.after(80, self._process_events)
+
+    def _handle_event(self, kind: str, payload: Any) -> None:
+        """Handles a single update of a download thread."""
+        if kind == "update":
+            self.queue_tab.update_task(payload)
+        elif kind == "finished":
+            self._on_finished(payload)
+        elif kind == "info":
+            self._on_info(payload)
+        elif kind == "instagram":
+            self._on_instagram(payload)
+        elif kind == "connection":
+            self._on_connection(payload)
+        elif kind == "instagram_item":
+            index, success, detail = payload
+            self.instagram_tab.item_finished(index, success)
+            if success:
+                self.history_tab.refresh()
 
     def _on_info(self, payload: tuple) -> None:
         """Shows the information of a link that was read in the background."""
         info, error = payload
         self.download_tab.fetch_button.configure(state="normal")
-        if hasattr(self.download_tab, "status"):
-            self.download_tab.status.grid_remove()
+        self.download_tab.status.grid_remove()
         if info is None:
             self.show_error(error or "The information could not be read.")
             return
         self.download_tab.show_info(info)
+
+    def _on_connection(self, payload: tuple) -> None:
+        """Shows the result of the connection test."""
+        info, error, ytdlp_version = payload
+        if info is None:
+            self.show_error(
+                f"The connection to the internet failed.\n\n{error}\n\n"
+                f"The details are written to {log_path()}"
+            )
+            return
+        self.show_message(f"The connection works, yt-dlp {ytdlp_version} is ready.")
 
     def _on_instagram(self, payload: tuple) -> None:
         """Shows the media of an instagram link."""

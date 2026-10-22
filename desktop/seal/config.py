@@ -70,6 +70,7 @@ class Settings:
     proxy: str = ""
     rate_limit: str = ""
     cookies_file: str = ""
+    cookies_from_browser: str = ""
     concurrent_fragments: int = 4
     max_concurrent_downloads: int = 2
     socket_timeout: int = 30

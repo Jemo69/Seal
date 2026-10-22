@@ -57,6 +57,10 @@ class DownloadTab(ttk.Frame):
         self.fetch_button = ttk.Button(frame, text="Fetch", command=self.fetch)
         self.fetch_button.grid(row=1, column=1, padx=(10, 0))
 
+        self.status = ttk.Label(self, text="Reading the information...", style="Muted.TLabel")
+        self.status.grid(row=4, column=0, sticky="w", pady=(10, 0))
+        self.status.grid_remove()
+
         ttk.Label(
             self,
             text="Several links can be pasted at once, they are downloaded one after another.",
@@ -122,8 +126,8 @@ class DownloadTab(ttk.Frame):
 
         url = urls[0]
         self.fetch_button.configure(state="disabled")
-        self.status = ttk.Label(self, text="Reading the information...", style="Muted.TLabel")
-        self.status.grid(row=4, column=0, sticky="w", pady=(10, 0))
+        self.status.configure(text="Reading the information...")
+        self.status.grid()
 
         # The callback runs in a download thread, the user interface is updated by the
         # main loop of the application.
@@ -135,6 +139,7 @@ class DownloadTab(ttk.Frame):
     def show_info(self, info: VideoInfo) -> None:
         """Fills the card with the information of a video."""
         self.info = info
+        self.status.grid_remove()
         self.title_label.configure(text=info.title)
         details = [part for part in (info.uploader, info.duration_text) if part]
         if info.is_playlist:

@@ -8,12 +8,24 @@ from tkinter import filedialog, ttk
 from typing import TYPE_CHECKING
 
 from ..config import Settings
+from ..logging_setup import log_path
 from .theme import Palette
 
 if TYPE_CHECKING:  # pragma: no cover
     from .app import MainWindow
 
 AUDIO_FORMATS = ("best", "m4a", "mp3", "opus", "wav", "flac")
+BROWSERS = (
+    "",
+    "chrome",
+    "edge",
+    "firefox",
+    "brave",
+    "opera",
+    "vivaldi",
+    "chromium",
+    "whale",
+)
 THEMES = ("system", "light", "dark")
 
 
@@ -32,10 +44,11 @@ class SettingsTab(ttk.Frame):
         self._build_formats()
         self._build_network()
         self._build_instagram()
+        self._build_diagnostics()
         self._build_appearance()
 
         buttons = ttk.Frame(self)
-        buttons.grid(row=25, column=0, columnspan=2, sticky="w", pady=(24, 0))
+        buttons.grid(row=29, column=0, columnspan=2, sticky="w", pady=(24, 0))
         ttk.Button(buttons, text="Save", style="Accent.TButton", command=self.save).pack(side="left")
         ttk.Button(buttons, text="Open the data folder", command=self.open_data_dir).pack(
             side="left", padx=8
@@ -108,9 +121,9 @@ class SettingsTab(ttk.Frame):
         self._entry(12, "proxy", "Proxy")
         self._entry(13, "rate_limit", "Maximum speed, for example 2M")
         self._entry(14, "cookies_file", "Cookies file", "file")
-        self._entry(15, "concurrent_fragments", "Fragments that are downloaded at once")
-        self._entry(16, "max_concurrent_downloads", "Downloads that run at the same time")
-        self._entry(17, "extra_args", "Extra arguments for yt-dlp")
+        self._choice(15, "cookies_from_browser", "Cookies from browser", BROWSERS)
+        self._entry(16, "concurrent_fragments", "Fragments that are downloaded at once")
+        self._entry(17, "max_concurrent_downloads", "Downloads that run at the same time")
 
     def _build_instagram(self) -> None:
         ttk.Label(self, text="Instagram", style="Title.TLabel").grid(
@@ -120,11 +133,31 @@ class SettingsTab(ttk.Frame):
         self._entry(22, "instagram_session_file", "Session file", "file")
         self._entry(23, "instagram_profile_limit", "How many posts of a profile are downloaded")
 
+    def _build_diagnostics(self) -> None:
+        ttk.Label(self, text="Diagnostics", style="Title.TLabel").grid(
+            row=24, column=0, sticky="w", pady=(24, 0)
+        )
+        self._entry(25, "extra_args", "Extra arguments for yt-dlp")
+        ttk.Label(self, text="The log file", style="Muted.TLabel").grid(
+            row=26, column=0, sticky="w", pady=(10, 0), padx=(0, 24)
+        )
+        ttk.Label(self, text=str(log_path()), style="Muted.TLabel").grid(
+            row=26, column=1, sticky="w", pady=(10, 0)
+        )
+        buttons = ttk.Frame(self)
+        buttons.grid(row=27, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        ttk.Button(buttons, text="Test the connection", command=self.test_connection).pack(
+            side="left"
+        )
+        ttk.Button(buttons, text="Open the log file", command=self.open_log).pack(
+            side="left", padx=8
+        )
+
     def _build_appearance(self) -> None:
         ttk.Label(self, text="Appearance", style="Title.TLabel").grid(
             row=18, column=0, sticky="w", pady=(24, 0)
         )
-        self._choice(24, "theme", "Theme", THEMES)
+        self._choice(28, "theme", "Theme", THEMES)
 
     # ------------------------------------------------------------------- actions
 
@@ -156,6 +189,32 @@ class SettingsTab(ttk.Frame):
         settings.save()
         self.app.apply_theme()
         self.app.show_message("The settings have been saved.")
+
+    def test_connection(self) -> None:
+        """Reads a video to check whether the connection works."""
+        from ..downloader import is_available, version
+
+        if not is_available():
+            self.app.show_error("yt-dlp is not installed on this machine.")
+            return
+
+        self.app.show_message("The connection is being tested...")
+        url = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+
+        def on_done(info, error):  # noqa: ANN001 - the callback of the manager
+            self.app.events.put(("connection", (info, error, version())))
+
+        self.app.manager.fetch_info(url, on_done)
+
+    def open_log(self) -> None:
+        """Opens the log file."""
+        from .history_tab import open_path
+
+        path = log_path()
+        if not path.exists():
+            self.app.show_error("There is no log file yet.")
+            return
+        open_path(str(path))
 
     def open_data_dir(self) -> None:
         from .history_tab import open_path

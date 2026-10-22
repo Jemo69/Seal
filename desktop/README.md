@@ -47,6 +47,19 @@ to convert the audio.
 The GitHub action `windows.yml` does the same on every push, the executable is uploaded as an
 artifact.
 
+## YouTube asks for a login
+
+YouTube shows a "Sign in to confirm you're not a bot" message for many videos, especially when
+the network is shared or a server. The application says so and the cookies of the browser solve
+it:
+
+1. Sign in to YouTube in your browser.
+2. Open the settings of the application and choose **Cookies from browser** (`chrome`, `edge`,
+   `firefox`, …).
+3. Read the link again.
+
+The cookies are read by yt-dlp directly from the browser, the application never sees them.
+
 ## Instagram
 
 Instagram asks for a login for most of the content. The application never stores a password:
@@ -79,6 +92,7 @@ written to `%LOCALAPPDATA%\Seal\history.json`.
 | Download the subtitles | Downloads the subtitles of the video |
 | Proxy | Sends the traffic through a proxy |
 | Maximum speed | Limits the speed of the download, for example `2M` |
+| Cookies from browser | The browser the cookies are taken from, YouTube asks for a login for most of the videos |
 | Cookies file | A cookies file of your browser, some sites ask for a login |
 | Extra arguments for yt-dlp | Anything that is not covered by the settings above |
 | Session file | The session of instaloader, it is needed for the stories of instagram |

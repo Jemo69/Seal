@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import Settings
+from .logging_setup import YtdlpLogger, log, log_exception
 from .models import Format, Task, TaskState, VideoInfo
 
 try:  # pragma: no cover - the import depends on the environment
@@ -101,7 +102,7 @@ class DownloadManager:
 
     # ------------------------------------------------------------------- options
 
-    def _base_options(self, audio_only: bool = False) -> dict[str, Any]:
+    def _base_options(self, audio_only: bool = False, quick: bool = False) -> dict[str, Any]:
         settings = self.settings
         options: dict[str, Any] = {
             "quiet": True,
@@ -109,13 +110,17 @@ class DownloadManager:
             "noprogress": True,
             "consoletitle": False,
             "windowsfilenames": True,
-            "ignoreerrors": "only_download",
-            "retries": 10,
-            "fragment_retries": 10,
-            "socket_timeout": settings.socket_timeout,
+            # "only_download" is truthy, yt-dlp would swallow every error of the extraction
+            # with it. The information of a link has to fail loudly.
+            "ignoreerrors": "only_download" if not quick else False,
+            # A link that cannot be read should not keep the user waiting for minutes.
+            "retries": 2 if quick else 5,
+            "fragment_retries": 2 if quick else 5,
+            "socket_timeout": min(settings.socket_timeout, 15) if quick else settings.socket_timeout,
             "concurrent_fragment_downloads": max(1, settings.concurrent_fragments),
             "outtmpl": {"default": settings.filename_template},
             "paths": {"home": str(settings.target_dir(audio_only))},
+            "logger": YtdlpLogger(),
         }
         if settings.proxy:
             options["proxy"] = settings.proxy
@@ -123,6 +128,9 @@ class DownloadManager:
             options["ratelimit"] = _parse_rate(settings.rate_limit)
         if settings.cookies_file and Path(settings.cookies_file).exists():
             options["cookiefile"] = settings.cookies_file
+        if settings.cookies_from_browser:
+            # Many sites ask for a login, the cookies of the browser solve that.
+            options["cookiesfrombrowser"] = (settings.cookies_from_browser, None, None, None)
         if settings.extra_args:
             options.update(_parse_extra_args(settings.extra_args))
         return options
@@ -172,7 +180,7 @@ class DownloadManager:
         return options
 
     def _info_options(self) -> dict[str, Any]:
-        options = self._base_options()
+        options = self._base_options(quick=True)
         options["extract_flat"] = "in_playlist"
         options["skip_download"] = True
         return options
@@ -189,15 +197,33 @@ class DownloadManager:
 
         def worker() -> None:
             _require_ytdlp()
-            try:
-                with yt_dlp.YoutubeDL(self._info_options()) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                if info is None:
-                    on_done(None, "No information found")
-                    return
-                on_done(VideoInfo.from_info(url, info), "")
-            except Exception as error:  # noqa: BLE001 - the message is shown to the user
-                on_done(None, str(error))
+            log(f"reading the information of {url}")
+            result: list[tuple[Any, str]] = []
+
+            def extract() -> None:
+                try:
+                    with yt_dlp.YoutubeDL(self._info_options()) as ydl:
+                        result.append((ydl.extract_info(url, download=False), ""))
+                except Exception as error:  # noqa: BLE001 - the message is shown to the user
+                    log_exception(f"the information of {url} could not be read")
+                    result.append((None, str(error)))
+
+            thread = threading.Thread(target=extract, daemon=True)
+            thread.start()
+            thread.join(timeout=INFO_TIMEOUT)
+            if thread.is_alive():
+                on_done(
+                    None,
+                    "The website did not answer in time. The connection to the internet might be "
+                    "blocked, a proxy could help.",
+                )
+                return
+
+            info, error = result[0] if result else (None, "No information found")
+            if info is None:
+                on_done(None, friendly_error(error or "No information found"))
+                return
+            on_done(VideoInfo.from_info(url, info), "")
 
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
@@ -236,6 +262,7 @@ class DownloadManager:
     def _run_download(self, task: Task) -> None:
         _require_ytdlp()
         options = self._download_options(task)
+        log(f"starting the download of {task.url}")
 
         def progress_hook(data: dict[str, Any]) -> None:
             if self._is_cancelled(task.task_id):
@@ -277,10 +304,35 @@ class DownloadManager:
             task.state = TaskState.CANCELED
             task.error = "Canceled"
         except Exception as error:  # noqa: BLE001 - the message is shown to the user
+            log_exception(f"the download of {task.url} failed")
             task.state = TaskState.ERROR
             task.error = str(error)
         self.on_update(task)
         self.on_finished(task)
+
+
+INFO_TIMEOUT = 90
+
+
+def friendly_error(error: str) -> str:
+    """Turns the message of yt-dlp into something the user can act on."""
+    lowered = error.lower()
+    if "sign in to confirm" in lowered or "login required" in lowered:
+        return (
+            "The website asks for a login for this video.\n\n"
+            "Choose the browser your are signed in with in the settings "
+            "(Cookies from browser) and try again."
+        )
+    if "private video" in lowered or "this video is private" in lowered:
+        return "This video is private, a login is needed to see it."
+    if "unsupported url" in lowered or "no video formats" in lowered:
+        return "The website does not offer any video for this link."
+    if "timed out" in lowered or "timed out" in lowered:
+        return (
+            "The website did not answer in time. The connection to the internet might be "
+            "blocked, a proxy could help."
+        )
+    return error
 
 
 def _downloaded_path(info: dict[str, Any] | None) -> str:
